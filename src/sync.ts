@@ -47,9 +47,15 @@ export async function runSync(silent: boolean): Promise<SyncOutcome> {
     const syncedIds = new Set(
       result.events.filter((event) => !event.skipped).map((event) => event.cli_id),
     );
+    const disconnectedIds = new Set(
+      result.events
+        .filter((event) => event.project_enabled === false)
+        .map((event) => event.cli_id),
+    );
 
     for (const event of events) {
       if (syncedIds.has(event.id)) event.syncedAt = now;
+      if (disconnectedIds.has(event.id)) event.status = "skipped";
     }
     saveEvents(events);
     pullPreferences(result);

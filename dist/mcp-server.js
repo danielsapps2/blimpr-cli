@@ -2980,7 +2980,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve2.call(this, root, ref);
+      let _sch = resolve4.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a = root.localRefs) === null || _a === void 0 ? void 0 : _a[ref];
         const { schemaId } = this.opts;
@@ -3007,7 +3007,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve2(root, ref) {
+    function resolve4(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -3634,21 +3634,21 @@ var require_fast_uri = __commonJS({
         normalizeString(uri, options);
       } else if (typeof uri === "object") {
         uri = /** @type {T} */
-        parse3(serialize(uri, options), options);
+        parse4(serialize(uri, options), options);
       }
       return uri;
     }
-    function resolve2(baseURI, relativeURI, options) {
+    function resolve4(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
-      const resolved = resolveComponent(parse3(baseURI, schemelessOptions), parse3(relativeURI, schemelessOptions), schemelessOptions, true);
+      const resolved = resolveComponent(parse4(baseURI, schemelessOptions), parse4(relativeURI, schemelessOptions), schemelessOptions, true);
       schemelessOptions.skipEscape = true;
       return serialize(resolved, schemelessOptions);
     }
     function resolveComponent(base, relative, options, skipNormalization) {
       const target = {};
       if (!skipNormalization) {
-        base = parse3(serialize(base, options), options);
-        relative = parse3(serialize(relative, options), options);
+        base = parse4(serialize(base, options), options);
+        relative = parse4(serialize(relative, options), options);
       }
       options = options || {};
       if (!options.tolerant && relative.scheme) {
@@ -3877,7 +3877,7 @@ var require_fast_uri = __commonJS({
       }
       return { parsed, malformedAuthorityOrPort };
     }
-    function parse3(uri, opts) {
+    function parse4(uri, opts) {
       return parseWithStatus(uri, opts).parsed;
     }
     function normalizeString(uri, opts) {
@@ -3902,11 +3902,11 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize,
-      resolve: resolve2,
+      resolve: resolve4,
       resolveComponent,
       equal,
       serialize,
-      parse: parse3
+      parse: parse4
     };
     module.exports = fastUri;
     module.exports.default = fastUri;
@@ -18985,7 +18985,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve2) => setTimeout(resolve2, pollInterval));
+        await new Promise((resolve4) => setTimeout(resolve4, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error2) {
@@ -19002,7 +19002,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve2, reject) => {
+    return new Promise((resolve4, reject) => {
       const earlyReject = (error2) => {
         reject(error2);
       };
@@ -19080,7 +19080,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject(parseResult.error);
           } else {
-            resolve2(parseResult.data);
+            resolve4(parseResult.data);
           }
         } catch (error2) {
           reject(error2);
@@ -19341,12 +19341,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve2, reject) => {
+    return new Promise((resolve4, reject) => {
       if (signal.aborted) {
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve2, interval);
+      const timeoutId = setTimeout(resolve4, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -20446,7 +20446,7 @@ var McpServer = class {
     let task = createTaskResult.task;
     const pollInterval = task.pollInterval ?? 5e3;
     while (task.status !== "completed" && task.status !== "failed" && task.status !== "cancelled") {
-      await new Promise((resolve2) => setTimeout(resolve2, pollInterval));
+      await new Promise((resolve4) => setTimeout(resolve4, pollInterval));
       const updatedTask = await extra.taskStore.getTask(taskId);
       if (!updatedTask) {
         throw new McpError(ErrorCode.InternalError, `Task ${taskId} not found during polling`);
@@ -21095,19 +21095,16 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve2) => {
+    return new Promise((resolve4) => {
       const json = serializeMessage(message);
       if (this._stdout.write(json)) {
-        resolve2();
+        resolve4();
       } else {
-        this._stdout.once("drain", resolve2);
+        this._stdout.once("drain", resolve4);
       }
     });
   }
 };
-
-// src/mcp-server.ts
-import { basename as basename2 } from "node:path";
 
 // src/shared/types.ts
 var DEFAULT_PREFERENCES = {
@@ -21248,12 +21245,20 @@ async function rpc(cfg, fn, args) {
   }
   return await res.json();
 }
+async function cloudProjectStatus(cfg, project) {
+  return rpc(cfg, "cli_project_status", {
+    p_key: cfg.apiKey,
+    p_repo_key: project.key,
+    p_repo_name: project.name
+  });
+}
 async function cloudSync(cfg, events) {
   return rpc(cfg, "cli_sync", {
     p_key: cfg.apiKey,
     p_events: events.map((e) => ({
       id: e.id,
       repoName: e.repoName,
+      repoKey: e.repoKey,
       kind: e.kind,
       source: e.source,
       summary: e.summary,
@@ -21310,6 +21315,54 @@ async function cloudQueueRender(cfg, event) {
   return await res.json();
 }
 
+// src/repository.ts
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { basename as basename2, resolve as resolve3 } from "node:path";
+
+// src/project.ts
+import { existsSync as existsSync3, statSync as statSync2 } from "node:fs";
+import { dirname, join as join3, parse as parse3, resolve as resolve2 } from "node:path";
+function resolveProjectPath(input = process.cwd()) {
+  let current = resolve2(input);
+  if (existsSync3(current) && statSync2(current).isFile()) {
+    current = dirname(current);
+  }
+  const startingPath = current;
+  const root = parse3(current).root;
+  while (true) {
+    if (existsSync3(join3(current, ".git"))) return current;
+    if (current === root) return startingPath;
+    current = dirname(current);
+  }
+}
+
+// src/repository.ts
+function gitRemote(repoPath) {
+  try {
+    return execFileSync(
+      "git",
+      ["-C", repoPath, "config", "--get", "remote.origin.url"],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }
+    ).trim() || void 0;
+  } catch {
+    return void 0;
+  }
+}
+function normalizeRemote(remote) {
+  return remote.trim().replace(/^git@([^:]+):/i, "https://$1/").replace(/^ssh:\/\/git@/i, "https://").replace(/\.git\/?$/i, "").replace(/\/+$/, "").toLowerCase();
+}
+function repositoryIdentity(input = process.cwd()) {
+  const path = resolveProjectPath(input);
+  const remote = gitRemote(path);
+  const fingerprint = remote ? `remote:${normalizeRemote(remote)}` : `local:${resolve3(path).toLowerCase()}`;
+  return {
+    path,
+    name: basename2(path),
+    key: createHash("sha256").update(fingerprint).digest("hex")
+  };
+}
+
 // src/sync.ts
 function pullPreferences(info) {
   savePreferences({
@@ -21341,8 +21394,12 @@ async function runSync(silent) {
     const syncedIds = new Set(
       result.events.filter((event) => !event.skipped).map((event) => event.cli_id)
     );
+    const disconnectedIds = new Set(
+      result.events.filter((event) => event.project_enabled === false).map((event) => event.cli_id)
+    );
     for (const event of events) {
       if (syncedIds.has(event.id)) event.syncedAt = now;
+      if (disconnectedIds.has(event.id)) event.status = "skipped";
     }
     saveEvents(events);
     pullPreferences(result);
@@ -21403,12 +21460,22 @@ server.registerTool(
     }
   },
   async ({ summary, details, kind, repoPath, files, screenshots }) => {
-    const repo = repoPath ?? process.cwd();
-    const importedScreenshots = screenshots ? importScreenshots(screenshots, repo) : void 0;
+    const repo = repositoryIdentity(repoPath);
+    const cfg = getCloudConfig();
+    if (cfg) {
+      const project = await cloudProjectStatus(cfg, repo);
+      if (!project.enabled) {
+        return text(
+          `${repo.name} is disconnected in Blimpr, so this update was not queued. Run \`blimpr project connect\` inside the repository to resume.`
+        );
+      }
+    }
+    const importedScreenshots = screenshots ? importScreenshots(screenshots, repo.path) : void 0;
     const event = addEvent({
       source: "mcp",
-      repoPath: repo,
-      repoName: basename2(repo),
+      repoPath: repo.path,
+      repoName: repo.name,
+      repoKey: repo.key,
       summary,
       details,
       files,
@@ -21505,11 +21572,21 @@ server.registerTool(
     }
   },
   async ({ title, description, repoPath }) => {
-    const repo = repoPath ?? process.cwd();
+    const repo = repositoryIdentity(repoPath);
+    const cfg = getCloudConfig();
+    if (cfg) {
+      const project = await cloudProjectStatus(cfg, repo);
+      if (!project.enabled) {
+        return text(
+          `${repo.name} is disconnected in Blimpr, so the launch kit was not queued.`
+        );
+      }
+    }
     const event = addEvent({
       source: "launch-kit",
-      repoPath: repo,
-      repoName: basename2(repo),
+      repoPath: repo.path,
+      repoName: repo.name,
+      repoKey: repo.key,
       summary: title,
       details: description,
       kind: "launch"

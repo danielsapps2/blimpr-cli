@@ -108,12 +108,28 @@ async function rpc(cfg, fn, args2) {
 async function cloudLink(apiKey, base = defaultCloud()) {
   return rpc(base, "cli_link", { p_key: apiKey });
 }
+async function cloudProjectStatus(cfg, project) {
+  return rpc(cfg, "cli_project_status", {
+    p_key: cfg.apiKey,
+    p_repo_key: project.key,
+    p_repo_name: project.name
+  });
+}
+async function cloudSetProjectEnabled(cfg, project, enabled) {
+  return rpc(cfg, "cli_set_project_enabled", {
+    p_key: cfg.apiKey,
+    p_repo_key: project.key,
+    p_repo_name: project.name,
+    p_enabled: enabled
+  });
+}
 async function cloudSync(cfg, events) {
   return rpc(cfg, "cli_sync", {
     p_key: cfg.apiKey,
     p_events: events.map((e) => ({
       id: e.id,
       repoName: e.repoName,
+      repoKey: e.repoKey,
       kind: e.kind,
       source: e.source,
       summary: e.summary,
@@ -412,10 +428,59 @@ function install(repoPath, log = console.log, distribution = "npm") {
 }
 
 // src/capture.ts
+import { execFileSync as execFileSync4 } from "node:child_process";
+
+// src/repository.ts
 import { execFileSync as execFileSync3 } from "node:child_process";
-import { basename as basename2 } from "node:path";
+import { createHash } from "node:crypto";
+import { basename as basename2, resolve as resolve3 } from "node:path";
+
+// src/project.ts
+import { existsSync as existsSync5, statSync as statSync2 } from "node:fs";
+import { dirname as dirname2, join as join5, parse, resolve as resolve2 } from "node:path";
+function resolveProjectPath(input = process.cwd()) {
+  let current = resolve2(input);
+  if (existsSync5(current) && statSync2(current).isFile()) {
+    current = dirname2(current);
+  }
+  const startingPath = current;
+  const root = parse(current).root;
+  while (true) {
+    if (existsSync5(join5(current, ".git"))) return current;
+    if (current === root) return startingPath;
+    current = dirname2(current);
+  }
+}
+
+// src/repository.ts
+function gitRemote(repoPath) {
+  try {
+    return execFileSync3(
+      "git",
+      ["-C", repoPath, "config", "--get", "remote.origin.url"],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }
+    ).trim() || void 0;
+  } catch {
+    return void 0;
+  }
+}
+function normalizeRemote(remote) {
+  return remote.trim().replace(/^git@([^:]+):/i, "https://$1/").replace(/^ssh:\/\/git@/i, "https://").replace(/\.git\/?$/i, "").replace(/\/+$/, "").toLowerCase();
+}
+function repositoryIdentity(input = process.cwd()) {
+  const path = resolveProjectPath(input);
+  const remote = gitRemote(path);
+  const fingerprint = remote ? `remote:${normalizeRemote(remote)}` : `local:${resolve3(path).toLowerCase()}`;
+  return {
+    path,
+    name: basename2(path),
+    key: createHash("sha256").update(fingerprint).digest("hex")
+  };
+}
+
+// src/capture.ts
 function git(repoPath, args2) {
-  return execFileSync3("git", ["-C", repoPath, ...args2], {
+  return execFileSync4("git", ["-C", repoPath, ...args2], {
     encoding: "utf8"
   }).trim();
 }
@@ -435,6 +500,8 @@ function classifyKind(subject) {
   return "progress";
 }
 function captureLatestCommit(repoPath) {
+  const repository = repositoryIdentity(repoPath);
+  repoPath = repository.path;
   let subject;
   let body;
   let hash;
@@ -467,7 +534,8 @@ function captureLatestCommit(repoPath) {
   const event = addEvent({
     source: "git-hook",
     repoPath,
-    repoName: basename2(repoPath),
+    repoName: repository.name,
+    repoKey: repository.key,
     commitHash: hash,
     summary: subject,
     details: body || void 0,
@@ -476,23 +544,6 @@ function captureLatestCommit(repoPath) {
     kind: classifyKind(subject)
   });
   return { captured: true, eventId: event.id };
-}
-
-// src/project.ts
-import { existsSync as existsSync5, statSync as statSync2 } from "node:fs";
-import { dirname as dirname2, join as join5, parse, resolve as resolve2 } from "node:path";
-function resolveProjectPath(input = process.cwd()) {
-  let current = resolve2(input);
-  if (existsSync5(current) && statSync2(current).isFile()) {
-    current = dirname2(current);
-  }
-  const startingPath = current;
-  const root = parse(current).root;
-  while (true) {
-    if (existsSync5(join5(current, ".git"))) return current;
-    if (current === root) return startingPath;
-    current = dirname2(current);
-  }
 }
 
 // src/sync.ts
@@ -526,8 +577,12 @@ async function runSync(silent) {
     const syncedIds = new Set(
       result.events.filter((event) => !event.skipped).map((event) => event.cli_id)
     );
+    const disconnectedIds = new Set(
+      result.events.filter((event) => event.project_enabled === false).map((event) => event.cli_id)
+    );
     for (const event of events) {
       if (syncedIds.has(event.id)) event.syncedAt = now;
+      if (disconnectedIds.has(event.id)) event.status = "skipped";
     }
     saveEvents(events);
     pullPreferences(result);
@@ -587,7 +642,23 @@ switch (command) {
     break;
   }
   case "capture": {
-    const result = captureLatestCommit(resolveProjectPath(args[0]));
+    const project = repositoryIdentity(args[0]);
+    const cfg = getCloudConfig();
+    if (cfg) {
+      try {
+        const remoteProject = await cloudProjectStatus(cfg, project);
+        if (!remoteProject.enabled) {
+          if (!quiet) {
+            console.log(
+              `Blimpr: not captured (${project.name} is disconnected; run \`blimpr project connect\` to resume)`
+            );
+          }
+          break;
+        }
+      } catch {
+      }
+    }
+    const result = captureLatestCommit(project.path);
     if (!quiet) {
       if (result.captured) {
         console.log(`Blimpr: queued event ${result.eventId}`);
@@ -599,11 +670,26 @@ switch (command) {
     break;
   }
   case "status": {
-    const events = listEvents();
+    const project = repositoryIdentity(args[0]);
+    const allEvents = listEvents();
+    const events = allEvents.filter(
+      (event) => event.repoKey === project.key || !event.repoKey && event.repoName === project.name
+    );
     const prefs = getPreferences();
     const linked = getCloudConfig();
+    let projectLabel = "local only";
+    if (linked) {
+      try {
+        const remoteProject = await cloudProjectStatus(linked, project);
+        projectLabel = remoteProject.enabled ? `active \xB7 ${remoteProject.event_count} cloud capture(s)` : "disconnected \xB7 no new captures";
+      } catch {
+        projectLabel = "cloud status unavailable";
+      }
+    }
     console.log(
-      `Blimpr queue (${events.length} events, cap ${prefs.monthlyCap}/mo, ${linked ? `linked: ${linked.email ?? "yes"}` : "not linked"}):`
+      `Blimpr project: ${project.name} (${projectLabel})
+Account: ${linked ? linked.email ?? "linked" : "not linked"} \xB7 plan cap ${prefs.monthlyCap}/mo
+Local captures from this project (${events.length}):`
     );
     for (const event of events.slice(-15)) {
       console.log(
@@ -631,6 +717,14 @@ switch (command) {
       console.log(
         `Linked to ${info.email ?? "your account"} (${info.tier} tier, ${info.monthly_cap} videos/mo).`
       );
+      const project = repositoryIdentity();
+      const projectStatus = await cloudProjectStatus(
+        { ...base, apiKey, email: info.email ?? void 0 },
+        project
+      );
+      console.log(
+        `${project.name} is ${projectStatus.enabled ? "active" : "disconnected"} in Blimpr.`
+      );
       await runSync(false);
     } catch (error) {
       console.error(`Link failed: ${error.message}`);
@@ -642,13 +736,52 @@ switch (command) {
     await runSync(false);
     break;
   }
+  case "project": {
+    const action = args[0] ?? "status";
+    const cfg = getCloudConfig();
+    if (!cfg) {
+      console.error("Not linked. Run: blimpr link <api-key>");
+      process.exitCode = 1;
+      break;
+    }
+    const project = repositoryIdentity(args[1]);
+    try {
+      if (action === "disconnect" || action === "off") {
+        await cloudSetProjectEnabled(cfg, project, false);
+        console.log(
+          `${project.name} disconnected. New commits and MCP updates from this repo will be ignored.`
+        );
+      } else if (action === "connect" || action === "reconnect" || action === "on") {
+        await cloudSetProjectEnabled(cfg, project, true);
+        console.log(
+          `${project.name} connected. New meaningful work from this repo will create videos.`
+        );
+      } else if (action === "status") {
+        const status = await cloudProjectStatus(cfg, project);
+        console.log(
+          `${project.name}: ${status.enabled ? "active" : "disconnected"} \xB7 ${status.event_count} capture(s) \xB7 ${status.queued_count} waiting`
+        );
+      } else {
+        console.error(
+          "usage: blimpr project <status|connect|disconnect> [path]"
+        );
+        process.exitCode = 1;
+      }
+    } catch (error) {
+      console.error(`Project command failed: ${error.message}`);
+      process.exitCode = 1;
+    }
+    break;
+  }
   case "mcp": {
     const serverUrl = new URL(`./${"mcp-server.js"}`, import.meta.url);
     await import(serverUrl.href);
     break;
   }
   default: {
-    console.log("usage: blimpr <install|capture|status|link|sync> [path]");
+    console.log(
+      "usage: blimpr <install|capture|status|link|sync|project> [path]"
+    );
     process.exitCode = command ? 1 : 0;
   }
 }

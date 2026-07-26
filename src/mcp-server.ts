@@ -9,9 +9,10 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { basename } from "node:path";
 import {
   addEvent,
+  cloudProjectStatus,
+  getCloudConfig,
   getEvent,
   getPreferences,
   importScreenshots,
@@ -19,6 +20,7 @@ import {
   listEvents,
   savePreferences,
 } from "./shared/index.js";
+import { repositoryIdentity } from "./repository.js";
 import { runSync } from "./sync.js";
 
 const server = new McpServer({ name: "blimpr", version: "0.1.0" });
@@ -68,14 +70,25 @@ server.registerTool(
     },
   },
   async ({ summary, details, kind, repoPath, files, screenshots }) => {
-    const repo = repoPath ?? process.cwd();
+    const repo = repositoryIdentity(repoPath);
+    const cfg = getCloudConfig();
+    if (cfg) {
+      const project = await cloudProjectStatus(cfg, repo);
+      if (!project.enabled) {
+        return text(
+          `${repo.name} is disconnected in Blimpr, so this update was not queued. ` +
+            "Run `blimpr project connect` inside the repository to resume.",
+        );
+      }
+    }
     const importedScreenshots = screenshots
-      ? importScreenshots(screenshots, repo)
+      ? importScreenshots(screenshots, repo.path)
       : undefined;
     const event = addEvent({
       source: "mcp",
-      repoPath: repo,
-      repoName: basename(repo),
+      repoPath: repo.path,
+      repoName: repo.name,
+      repoKey: repo.key,
       summary,
       details,
       files,
@@ -210,11 +223,21 @@ server.registerTool(
     },
   },
   async ({ title, description, repoPath }) => {
-    const repo = repoPath ?? process.cwd();
+    const repo = repositoryIdentity(repoPath);
+    const cfg = getCloudConfig();
+    if (cfg) {
+      const project = await cloudProjectStatus(cfg, repo);
+      if (!project.enabled) {
+        return text(
+          `${repo.name} is disconnected in Blimpr, so the launch kit was not queued.`,
+        );
+      }
+    }
     const event = addEvent({
       source: "launch-kit",
-      repoPath: repo,
-      repoName: basename(repo),
+      repoPath: repo.path,
+      repoName: repo.name,
+      repoKey: repo.key,
       summary: title,
       details: description,
       kind: "launch",

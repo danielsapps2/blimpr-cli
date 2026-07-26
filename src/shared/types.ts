@@ -13,6 +13,8 @@ export interface ShipEvent {
   repoPath: string;
   /** Repo directory name, used as the project label in reels. */
   repoName: string;
+  /** Privacy-preserving stable identity for the Git repository. */
+  repoKey: string;
   /** Commit hash when captured from git. */
   commitHash?: string;
   /** One-line summary (commit subject or agent-provided summary). */

@@ -38,9 +38,29 @@ blimpr capture [path]   Capture the latest meaningful commit
 blimpr status           Show the local content queue
 blimpr link <api-key>   Connect this machine to a Blimpr account
 blimpr sync             Sync events and cloud-render only the newest one
+blimpr project status   Show whether the current Git repo is active
+blimpr project disconnect
+                        Stop new videos for the current Git repo
+blimpr project connect  Resume new videos for the current Git repo
 ```
 
 `blimpr mcp` is the stdio entry point used by MCP clients.
+
+## Multiple projects
+
+Blimpr identifies the nearest Git repository, even when you run a command from
+a nested package or app. Every repository touched by the hook or MCP server
+appears in the dashboard automatically.
+
+Projects start active. Disconnecting one keeps its existing videos and history
+but ignores future commits and MCP updates until you reconnect it:
+
+```sh
+cd path/to/your-project
+blimpr project status
+blimpr project disconnect
+blimpr project connect
+```
 
 There is no local render command. After capture or sync, Blimpr automatically
 starts a hosted render for the newest queued event. Older backlog items stay

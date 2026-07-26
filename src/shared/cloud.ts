@@ -86,7 +86,47 @@ export async function cloudLink(
 }
 
 export interface SyncResult extends AccountInfo {
-  events: { cli_id: string; id?: string; status?: string; skipped?: string }[];
+  events: {
+    cli_id: string;
+    id?: string;
+    status?: string;
+    skipped?: string;
+    project_enabled?: boolean;
+  }[];
+}
+
+export type CloudProject = {
+  repo_id: string;
+  repo_key: string;
+  repo_name: string;
+  enabled: boolean;
+  event_count: number;
+  queued_count: number;
+  last_event_at: string | null;
+};
+
+export async function cloudProjectStatus(
+  cfg: CloudConfig,
+  project: { key: string; name: string },
+): Promise<CloudProject> {
+  return rpc<CloudProject>(cfg, "cli_project_status", {
+    p_key: cfg.apiKey,
+    p_repo_key: project.key,
+    p_repo_name: project.name,
+  });
+}
+
+export async function cloudSetProjectEnabled(
+  cfg: CloudConfig,
+  project: { key: string; name: string },
+  enabled: boolean,
+): Promise<CloudProject> {
+  return rpc<CloudProject>(cfg, "cli_set_project_enabled", {
+    p_key: cfg.apiKey,
+    p_repo_key: project.key,
+    p_repo_name: project.name,
+    p_enabled: enabled,
+  });
 }
 
 export async function cloudSync(
@@ -98,6 +138,7 @@ export async function cloudSync(
     p_events: events.map((e) => ({
       id: e.id,
       repoName: e.repoName,
+      repoKey: e.repoKey,
       kind: e.kind,
       source: e.source,
       summary: e.summary,

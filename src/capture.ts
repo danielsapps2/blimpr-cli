@@ -5,8 +5,8 @@
  * Codex CLI, and plain terminal commits.
  */
 import { execFileSync } from "node:child_process";
-import { basename } from "node:path";
 import { addEvent, ShipEvent } from "./shared/index.js";
+import { repositoryIdentity } from "./repository.js";
 
 function git(repoPath: string, args: string[]): string {
   return execFileSync("git", ["-C", repoPath, ...args], {
@@ -39,6 +39,8 @@ export interface CaptureResult {
 }
 
 export function captureLatestCommit(repoPath: string): CaptureResult {
+  const repository = repositoryIdentity(repoPath);
+  repoPath = repository.path;
   let subject: string;
   let body: string;
   let hash: string;
@@ -80,7 +82,8 @@ export function captureLatestCommit(repoPath: string): CaptureResult {
   const event = addEvent({
     source: "git-hook",
     repoPath,
-    repoName: basename(repoPath),
+    repoName: repository.name,
+    repoKey: repository.key,
     commitHash: hash,
     summary: subject,
     details: body || undefined,
