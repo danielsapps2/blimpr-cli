@@ -65,9 +65,11 @@ function savePreferences(prefs) {
 
 // src/shared/cloud.ts
 import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, existsSync as existsSync2 } from "node:fs";
-import { join as join2 } from "node:path";
+import { extname as extname2, join as join2 } from "node:path";
 var DEFAULT_URL = "https://zxpvdblgkglwjrrdykon.supabase.co";
 var DEFAULT_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp4cHZkYmxna2dsd2pycmR5a29uIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODUwMjA2NzksImV4cCI6MjEwMDU5NjY3OX0.DqmsNtGDJdUFS_EyURngLm9V52lLGXcYmLlKJT-Nt88";
+var DEFAULT_APP_URL = "https://autoship-five.vercel.app";
+var MAX_HOSTED_SCREENSHOT_BYTES = 25e5;
 var configPath = () => join2(blimprDir(), "config.json");
 function getCloudConfig() {
   if (!existsSync2(configPath())) return void 0;
@@ -121,6 +123,50 @@ async function cloudSync(cfg, events) {
       capturedAt: e.capturedAt
     }))
   });
+}
+function screenshotDataUrl(path) {
+  const mimeByExtension = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp"
+  };
+  const mime = mimeByExtension[extname2(path).toLowerCase()];
+  if (!mime) throw new Error(`Unsupported screenshot format: ${path}`);
+  const bytes = readFileSync2(path);
+  return {
+    src: `data:${mime};base64,${bytes.toString("base64")}`,
+    bytes: bytes.length
+  };
+}
+async function cloudQueueRender(cfg, event) {
+  const appUrl = (process.env.BLIMPR_APP_URL ?? DEFAULT_APP_URL).replace(/\/$/, "");
+  let screenshotBytes = 0;
+  const screenshots = [];
+  for (const screenshot of event.screenshots ?? []) {
+    const encoded = screenshotDataUrl(screenshot.path);
+    if (screenshotBytes + encoded.bytes > MAX_HOSTED_SCREENSHOT_BYTES) continue;
+    screenshotBytes += encoded.bytes;
+    screenshots.push({
+      id: screenshot.id,
+      src: encoded.src,
+      caption: screenshot.caption
+    });
+  }
+  const res = await fetch(`${appUrl}/api/renders/queue`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      apiKey: cfg.apiKey,
+      cliId: event.id,
+      screenshots
+    })
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`render queue failed (${res.status}): ${body.slice(0, 300)}`);
+  }
+  return await res.json();
 }
 
 // src/install.ts
@@ -448,10 +494,7 @@ function resolveProjectPath(input = process.cwd()) {
   }
 }
 
-// src/cli.ts
-var [, , command, ...rest] = process.argv;
-var quiet = rest.includes("--quiet");
-var args = rest.filter((a) => !a.startsWith("--"));
+// src/sync.ts
 function pullPreferences(info) {
   savePreferences({
     tone: info.tone,
@@ -466,37 +509,72 @@ async function runSync(silent) {
   const cfg = getCloudConfig();
   if (!cfg) {
     if (!silent) console.error("Not linked. Run: blimpr link <api-key>");
-    return;
+    return { synced: 0, renderQueued: false };
   }
   const events = listEvents();
-  const pending = events.filter((e) => !e.syncedAt && e.status !== "skipped");
+  const pending = events.filter(
+    (event) => !event.syncedAt && event.status !== "skipped"
+  );
   if (pending.length === 0) {
     if (!silent) console.log("Nothing to sync.");
-    return;
+    return { synced: 0, renderQueued: false };
   }
   try {
     const result = await cloudSync(cfg, pending);
     const now = (/* @__PURE__ */ new Date()).toISOString();
-    const skippedIds = new Set(
-      result.events.filter((r) => r.skipped).map((r) => r.cli_id)
+    const syncedIds = new Set(
+      result.events.filter((event) => !event.skipped).map((event) => event.cli_id)
     );
-    for (const e of events) {
-      if (pending.some((p) => p.id === e.id) && !skippedIds.has(e.id)) {
-        e.syncedAt = now;
-      }
+    for (const event of events) {
+      if (syncedIds.has(event.id)) event.syncedAt = now;
     }
     saveEvents(events);
     pullPreferences(result);
-    if (!silent) {
-      const synced = result.events.filter((r) => !r.skipped).length;
-      console.log(`Synced ${synced} event(s).`);
-      for (const r of result.events.filter((r2) => r2.skipped)) {
-        console.log(`  skipped ${r.cli_id}: ${r.skipped}`);
+    const newest = pending.filter((event) => syncedIds.has(event.id)).sort((a, b) => b.capturedAt.localeCompare(a.capturedAt))[0];
+    let renderQueued = false;
+    if (newest) {
+      try {
+        await cloudQueueRender(cfg, newest);
+        renderQueued = true;
+      } catch (error) {
+        if (!silent) {
+          console.error(
+            `Synced, but cloud render could not start: ${error.message}`
+          );
+        }
       }
     }
-  } catch (err) {
-    if (!silent) console.error(`Sync failed: ${err.message}`);
+    if (!silent) {
+      console.log(`Synced ${syncedIds.size} event(s).`);
+      if (renderQueued && newest) {
+        console.log(
+          `Cloud render queued for the newest event (${newest.id}); older backlog items stay manual.`
+        );
+      }
+      for (const event of result.events.filter((item) => item.skipped)) {
+        console.log(`  skipped ${event.cli_id}: ${event.skipped}`);
+      }
+    }
+    return { synced: syncedIds.size, renderQueued };
+  } catch (error) {
+    if (!silent) console.error(`Sync failed: ${error.message}`);
+    return { synced: 0, renderQueued: false };
   }
+}
+
+// src/cli.ts
+var [, , command, ...rest] = process.argv;
+var quiet = rest.includes("--quiet");
+var args = rest.filter((argument) => !argument.startsWith("--"));
+function pullPreferences2(info) {
+  savePreferences({
+    tone: info.tone,
+    platforms: info.platforms,
+    autoPost: info.auto_post,
+    productName: info.product_name ?? void 0,
+    handle: info.handle ?? void 0,
+    monthlyCap: info.monthly_cap
+  });
 }
 switch (command) {
   case "install": {
@@ -526,12 +604,14 @@ switch (command) {
     console.log(
       `Blimpr queue (${events.length} events, cap ${prefs.monthlyCap}/mo, ${linked ? `linked: ${linked.email ?? "yes"}` : "not linked"}):`
     );
-    for (const e of events.slice(-15)) {
+    for (const event of events.slice(-15)) {
       console.log(
-        `  ${e.id}  ${e.status.padEnd(8)} ${e.kind.padEnd(9)} ${e.syncedAt ? "\u2601 " : "  "}${e.repoName}: ${e.summary}`
+        `  ${event.id}  ${event.status.padEnd(8)} ${event.kind.padEnd(9)} ${event.syncedAt ? "\u2601 " : "  "}${event.repoName}: ${event.summary}`
       );
     }
-    if (events.length === 0) console.log("  (empty \u2014 commit something meaningful)");
+    if (events.length === 0) {
+      console.log("  (empty \u2014 commit something meaningful)");
+    }
     break;
   }
   case "link": {
@@ -546,13 +626,13 @@ switch (command) {
       const info = await cloudLink(apiKey);
       const base = defaultCloud();
       saveCloudConfig({ ...base, apiKey, email: info.email ?? void 0 });
-      pullPreferences(info);
+      pullPreferences2(info);
       console.log(
         `Linked to ${info.email ?? "your account"} (${info.tier} tier, ${info.monthly_cap} videos/mo).`
       );
       await runSync(false);
-    } catch (err) {
-      console.error(`Link failed: ${err.message}`);
+    } catch (error) {
+      console.error(`Link failed: ${error.message}`);
       process.exit(1);
     }
     break;

@@ -10,19 +10,17 @@ then queues that context for the founder's review-first content pipeline.
 npx blimpr install
 ```
 
-Until the first npm release is published, the same CLI can run directly from
-GitHub:
+You can also run the latest source directly from GitHub:
 
 ```sh
-npx github:danielsapps2/blimpr-cli install --github
+npx github:danielsapps2/blimpr-cli install
 ```
 
-To make the `blimpr` command available globally before the npm release, install
-the GitHub archive:
+To make the `blimpr` command available globally:
 
 ```sh
-npm install --global https://github.com/danielsapps2/blimpr-cli/archive/refs/heads/main.tar.gz
-blimpr install --github
+npm install --global blimpr
+blimpr install
 ```
 
 Run the command anywhere inside a Git repository. Blimpr finds the nearest
@@ -42,10 +40,14 @@ blimpr install [path]   Configure the nearest Git repository
 blimpr capture [path]   Capture the latest meaningful commit
 blimpr status           Show the local content queue
 blimpr link <api-key>   Connect this machine to a Blimpr account
-blimpr sync             Sync queued events
+blimpr sync             Sync events and cloud-render only the newest one
 ```
 
 `blimpr mcp` is the stdio entry point used by MCP clients.
+
+There is no local render command. After capture or sync, Blimpr automatically
+starts a hosted render for the newest queued event. Older backlog items stay
+available in the dashboard so you can choose which ones are worth rendering.
 
 ## Privacy
 

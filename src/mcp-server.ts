@@ -19,6 +19,7 @@ import {
   listEvents,
   savePreferences,
 } from "./shared/index.js";
+import { runSync } from "./sync.js";
 
 const server = new McpServer({ name: "blimpr", version: "0.1.0" });
 
@@ -81,9 +82,12 @@ server.registerTool(
       screenshots: importedScreenshots,
       kind,
     });
+    const sync = await runSync(true);
     return text(
       `Queued update ${event.id} ("${summary}"). It will become a short vertical video; ` +
-        `the founder reviews before anything is posted.` +
+        (sync.renderQueued
+          ? `the cloud render has started and the founder reviews before anything is posted.`
+          : `it will sync automatically when this repo next connects, and the founder reviews before anything is posted.`) +
         (importedScreenshots?.length
           ? ` Attached ${importedScreenshots.length} screenshot(s) as visual proof.`
           : ""),
@@ -155,8 +159,9 @@ server.registerTool(
             .map((shot) => `${shot.id} (${shot.caption ?? shot.originalName})`)
             .join(", ")}`
         : "screenshots: none",
-      event.script ? `script hook: "${event.script.hook}"` : "script: not generated yet",
-      event.videoPath ? `video: ${event.videoPath}` : `render with: npm run render -- --event ${event.id}`,
+      event.syncedAt
+        ? "video: hosted render queued or waiting in the dashboard backlog"
+        : "video: syncs and renders automatically when the linked CLI is available",
     ].filter(Boolean);
     return text(lines.join("\n"));
   },
@@ -214,8 +219,13 @@ server.registerTool(
       details: description,
       kind: "launch",
     });
+    const sync = await runSync(true);
     return text(
-      `Launch kit queued as event ${event.id}. Render it with: npm run render -- --event ${event.id}`,
+      `Launch kit queued as event ${event.id}. ${
+        sync.renderQueued
+          ? "The cloud render has started."
+          : "It will sync and render automatically when the linked CLI is available."
+      }`,
     );
   },
 );

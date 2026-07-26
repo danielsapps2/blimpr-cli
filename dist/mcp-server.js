@@ -21217,6 +21217,166 @@ function savePreferences(prefs) {
   return merged;
 }
 
+// src/shared/cloud.ts
+import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, existsSync as existsSync2 } from "node:fs";
+import { extname as extname2, join as join2 } from "node:path";
+var DEFAULT_APP_URL = "https://autoship-five.vercel.app";
+var MAX_HOSTED_SCREENSHOT_BYTES = 25e5;
+var configPath = () => join2(blimprDir(), "config.json");
+function getCloudConfig() {
+  if (!existsSync2(configPath())) return void 0;
+  try {
+    const cfg = JSON.parse(readFileSync2(configPath(), "utf8"));
+    return cfg.apiKey ? cfg : void 0;
+  } catch {
+    return void 0;
+  }
+}
+async function rpc(cfg, fn, args) {
+  const res = await fetch(`${cfg.url}/rest/v1/rpc/${fn}`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      apikey: cfg.anonKey,
+      authorization: `Bearer ${cfg.anonKey}`
+    },
+    body: JSON.stringify(args)
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`${fn} failed (${res.status}): ${body.slice(0, 300)}`);
+  }
+  return await res.json();
+}
+async function cloudSync(cfg, events) {
+  return rpc(cfg, "cli_sync", {
+    p_key: cfg.apiKey,
+    p_events: events.map((e) => ({
+      id: e.id,
+      repoName: e.repoName,
+      kind: e.kind,
+      source: e.source,
+      summary: e.summary,
+      details: e.details ?? null,
+      files: e.files ?? null,
+      stats: e.stats ?? null,
+      capturedAt: e.capturedAt
+    }))
+  });
+}
+function screenshotDataUrl(path) {
+  const mimeByExtension = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp"
+  };
+  const mime = mimeByExtension[extname2(path).toLowerCase()];
+  if (!mime) throw new Error(`Unsupported screenshot format: ${path}`);
+  const bytes = readFileSync2(path);
+  return {
+    src: `data:${mime};base64,${bytes.toString("base64")}`,
+    bytes: bytes.length
+  };
+}
+async function cloudQueueRender(cfg, event) {
+  const appUrl = (process.env.BLIMPR_APP_URL ?? DEFAULT_APP_URL).replace(/\/$/, "");
+  let screenshotBytes = 0;
+  const screenshots = [];
+  for (const screenshot of event.screenshots ?? []) {
+    const encoded = screenshotDataUrl(screenshot.path);
+    if (screenshotBytes + encoded.bytes > MAX_HOSTED_SCREENSHOT_BYTES) continue;
+    screenshotBytes += encoded.bytes;
+    screenshots.push({
+      id: screenshot.id,
+      src: encoded.src,
+      caption: screenshot.caption
+    });
+  }
+  const res = await fetch(`${appUrl}/api/renders/queue`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      apiKey: cfg.apiKey,
+      cliId: event.id,
+      screenshots
+    })
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`render queue failed (${res.status}): ${body.slice(0, 300)}`);
+  }
+  return await res.json();
+}
+
+// src/sync.ts
+function pullPreferences(info) {
+  savePreferences({
+    tone: info.tone,
+    platforms: info.platforms,
+    autoPost: info.auto_post,
+    productName: info.product_name ?? void 0,
+    handle: info.handle ?? void 0,
+    monthlyCap: info.monthly_cap
+  });
+}
+async function runSync(silent) {
+  const cfg = getCloudConfig();
+  if (!cfg) {
+    if (!silent) console.error("Not linked. Run: blimpr link <api-key>");
+    return { synced: 0, renderQueued: false };
+  }
+  const events = listEvents();
+  const pending = events.filter(
+    (event) => !event.syncedAt && event.status !== "skipped"
+  );
+  if (pending.length === 0) {
+    if (!silent) console.log("Nothing to sync.");
+    return { synced: 0, renderQueued: false };
+  }
+  try {
+    const result = await cloudSync(cfg, pending);
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const syncedIds = new Set(
+      result.events.filter((event) => !event.skipped).map((event) => event.cli_id)
+    );
+    for (const event of events) {
+      if (syncedIds.has(event.id)) event.syncedAt = now;
+    }
+    saveEvents(events);
+    pullPreferences(result);
+    const newest = pending.filter((event) => syncedIds.has(event.id)).sort((a, b) => b.capturedAt.localeCompare(a.capturedAt))[0];
+    let renderQueued = false;
+    if (newest) {
+      try {
+        await cloudQueueRender(cfg, newest);
+        renderQueued = true;
+      } catch (error2) {
+        if (!silent) {
+          console.error(
+            `Synced, but cloud render could not start: ${error2.message}`
+          );
+        }
+      }
+    }
+    if (!silent) {
+      console.log(`Synced ${syncedIds.size} event(s).`);
+      if (renderQueued && newest) {
+        console.log(
+          `Cloud render queued for the newest event (${newest.id}); older backlog items stay manual.`
+        );
+      }
+      for (const event of result.events.filter((item) => item.skipped)) {
+        console.log(`  skipped ${event.cli_id}: ${event.skipped}`);
+      }
+    }
+    return { synced: syncedIds.size, renderQueued };
+  } catch (error2) {
+    if (!silent) console.error(`Sync failed: ${error2.message}`);
+    return { synced: 0, renderQueued: false };
+  }
+}
+
 // src/mcp-server.ts
 var server = new McpServer({ name: "blimpr", version: "0.1.0" });
 var text = (t) => ({ content: [{ type: "text", text: t }] });
@@ -21254,8 +21414,9 @@ server.registerTool(
       screenshots: importedScreenshots,
       kind
     });
+    const sync = await runSync(true);
     return text(
-      `Queued update ${event.id} ("${summary}"). It will become a short vertical video; the founder reviews before anything is posted.` + (importedScreenshots?.length ? ` Attached ${importedScreenshots.length} screenshot(s) as visual proof.` : "")
+      `Queued update ${event.id} ("${summary}"). It will become a short vertical video; ` + (sync.renderQueued ? `the cloud render has started and the founder reviews before anything is posted.` : `it will sync automatically when this repo next connects, and the founder reviews before anything is posted.`) + (importedScreenshots?.length ? ` Attached ${importedScreenshots.length} screenshot(s) as visual proof.` : "")
     );
   }
 );
@@ -21302,8 +21463,7 @@ server.registerTool(
       `summary: ${event.summary}`,
       event.details ? `details: ${event.details}` : null,
       event.screenshots?.length ? `screenshots: ${event.screenshots.map((shot) => `${shot.id} (${shot.caption ?? shot.originalName})`).join(", ")}` : "screenshots: none",
-      event.script ? `script hook: "${event.script.hook}"` : "script: not generated yet",
-      event.videoPath ? `video: ${event.videoPath}` : `render with: npm run render -- --event ${event.id}`
+      event.syncedAt ? "video: hosted render queued or waiting in the dashboard backlog" : "video: syncs and renders automatically when the linked CLI is available"
     ].filter(Boolean);
     return text(lines.join("\n"));
   }
@@ -21353,8 +21513,9 @@ server.registerTool(
       details: description,
       kind: "launch"
     });
+    const sync = await runSync(true);
     return text(
-      `Launch kit queued as event ${event.id}. Render it with: npm run render -- --event ${event.id}`
+      `Launch kit queued as event ${event.id}. ${sync.renderQueued ? "The cloud render has started." : "It will sync and render automatically when the linked CLI is available."}`
     );
   }
 );

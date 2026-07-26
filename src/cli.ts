@@ -5,27 +5,26 @@
  *   blimpr capture          queue the latest commit (called by the git hook)
  *   blimpr status           show the content queue
  *   blimpr link <api-key>   connect this machine to your Blimpr account
- *   blimpr sync             push queued events to your account
+ *   blimpr sync             push queued events and render the newest one
  */
 import {
-  listEvents,
-  getPreferences,
-  savePreferences,
-  saveEvents,
   cloudLink,
-  cloudSync,
   defaultCloud,
   getCloudConfig,
+  getPreferences,
+  listEvents,
   saveCloudConfig,
+  savePreferences,
   type AccountInfo,
 } from "./shared/index.js";
 import { install } from "./install.js";
 import { captureLatestCommit } from "./capture.js";
 import { resolveProjectPath } from "./project.js";
+import { runSync } from "./sync.js";
 
 const [, , command, ...rest] = process.argv;
 const quiet = rest.includes("--quiet");
-const args = rest.filter((a) => !a.startsWith("--"));
+const args = rest.filter((argument) => !argument.startsWith("--"));
 
 function pullPreferences(info: AccountInfo) {
   savePreferences({
@@ -36,45 +35,6 @@ function pullPreferences(info: AccountInfo) {
     handle: info.handle ?? undefined,
     monthlyCap: info.monthly_cap,
   });
-}
-
-/** Push unsynced events; used by `sync` and automatically after `capture`. */
-async function runSync(silent: boolean): Promise<void> {
-  const cfg = getCloudConfig();
-  if (!cfg) {
-    if (!silent) console.error("Not linked. Run: blimpr link <api-key>");
-    return;
-  }
-  const events = listEvents();
-  const pending = events.filter((e) => !e.syncedAt && e.status !== "skipped");
-  if (pending.length === 0) {
-    if (!silent) console.log("Nothing to sync.");
-    return;
-  }
-  try {
-    const result = await cloudSync(cfg, pending);
-    const now = new Date().toISOString();
-    const skippedIds = new Set(
-      result.events.filter((r) => r.skipped).map((r) => r.cli_id),
-    );
-    for (const e of events) {
-      if (pending.some((p) => p.id === e.id) && !skippedIds.has(e.id)) {
-        e.syncedAt = now;
-      }
-    }
-    saveEvents(events);
-    // Preferences may have changed in the dashboard — pull them down.
-    pullPreferences(result);
-    if (!silent) {
-      const synced = result.events.filter((r) => !r.skipped).length;
-      console.log(`Synced ${synced} event(s).`);
-      for (const r of result.events.filter((r) => r.skipped)) {
-        console.log(`  skipped ${r.cli_id}: ${r.skipped}`);
-      }
-    }
-  } catch (err) {
-    if (!silent) console.error(`Sync failed: ${(err as Error).message}`);
-  }
 }
 
 switch (command) {
@@ -95,7 +55,6 @@ switch (command) {
         console.log(`Blimpr: not captured (${result.reason})`);
       }
     }
-    // Hook path: push to the account immediately so the dashboard stays live.
     if (result.captured) await runSync(true);
     break;
   }
@@ -107,13 +66,15 @@ switch (command) {
       `Blimpr queue (${events.length} events, cap ${prefs.monthlyCap}/mo, ` +
         `${linked ? `linked: ${linked.email ?? "yes"}` : "not linked"}):`,
     );
-    for (const e of events.slice(-15)) {
+    for (const event of events.slice(-15)) {
       console.log(
-        `  ${e.id}  ${e.status.padEnd(8)} ${e.kind.padEnd(9)} ` +
-          `${e.syncedAt ? "☁ " : "  "}${e.repoName}: ${e.summary}`,
+        `  ${event.id}  ${event.status.padEnd(8)} ${event.kind.padEnd(9)} ` +
+          `${event.syncedAt ? "☁ " : "  "}${event.repoName}: ${event.summary}`,
       );
     }
-    if (events.length === 0) console.log("  (empty — commit something meaningful)");
+    if (events.length === 0) {
+      console.log("  (empty — commit something meaningful)");
+    }
     break;
   }
   case "link": {
@@ -133,8 +94,8 @@ switch (command) {
         `Linked to ${info.email ?? "your account"} (${info.tier} tier, ${info.monthly_cap} videos/mo).`,
       );
       await runSync(false);
-    } catch (err) {
-      console.error(`Link failed: ${(err as Error).message}`);
+    } catch (error) {
+      console.error(`Link failed: ${(error as Error).message}`);
       process.exit(1);
     }
     break;
@@ -144,8 +105,6 @@ switch (command) {
     break;
   }
   case "mcp": {
-    // The bundled server is a sibling output file in the published package.
-    // Using a non-literal URL keeps esbuild from folding it into the CLI.
     const serverUrl = new URL(`./${"mcp-server.js"}`, import.meta.url);
     await import(serverUrl.href);
     break;
