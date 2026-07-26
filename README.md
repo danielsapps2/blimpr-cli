@@ -17,6 +17,14 @@ GitHub:
 npx github:danielsapps2/blimpr-cli install --github
 ```
 
+To make the `blimpr` command available globally before the npm release, install
+the GitHub archive:
+
+```sh
+npm install --global https://github.com/danielsapps2/blimpr-cli/archive/refs/heads/main.tar.gz
+blimpr install
+```
+
 Run the command anywhere inside a Git repository. Blimpr finds the nearest
 repository root, installs a post-commit hook, adds agent instructions, and
 registers its five-tool MCP server with the coding tools found on the machine.
