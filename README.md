@@ -10,6 +10,13 @@ then queues that context for the founder's review-first content pipeline.
 npx blimpr install
 ```
 
+Until the first npm release is published, the same CLI can run directly from
+GitHub:
+
+```sh
+npx github:danielsapps2/blimpr-cli install
+```
+
 Run the command anywhere inside a Git repository. Blimpr finds the nearest
 repository root, installs a post-commit hook, adds agent instructions, and
 registers its five-tool MCP server with the coding tools found on the machine.
