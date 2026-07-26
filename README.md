@@ -16,7 +16,7 @@ nested package or app directory.
 To make the shorter `blimpr` command available globally:
 
 ```sh
-npm install --global github:danielsapps2/blimpr-cli
+npm install --global https://github.com/danielsapps2/blimpr-cli/archive/refs/heads/main.tar.gz
 blimpr install --github
 ```
 
