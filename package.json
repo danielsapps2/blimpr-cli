@@ -13,7 +13,6 @@
     "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm run build",
-    "prepare": "npm run build",
     "prepack": "npm run check"
   },
   "engines": {
