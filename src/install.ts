@@ -76,7 +76,7 @@ function installGitHook(
     const existing = readFileSync(hookPath, "utf8");
     const captureLine = captureCommand(packageName);
     const managedCapture =
-      /^(?:node\s+"[^"]*\/packages\/installer\/dist\/cli\.js"|npx(?:\.cmd)?\s+(?:--yes|-y)\s+(?:blimpr(?:@latest)?|github:danielsapps2\/blimpr-cli))\s+capture --quiet \|\| true\r?$/gm;
+      /^(?:node\s+"[^"]*(?:\/packages\/installer\/dist\/cli\.js|\/blimpr-cli\/dist\/cli\.js)"|npx(?:\.cmd)?\s+(?:--yes|-y)\s+(?:blimpr(?:@latest)?|github:danielsapps2\/blimpr-cli))\s+capture --quiet \|\| true\r?$/gm;
     if (managedCapture.test(existing)) {
       const updated = `${existing
         .replace("# AutoShip:", "# Blimpr:")
