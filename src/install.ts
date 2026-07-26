@@ -18,18 +18,24 @@ import { dirname, join } from "node:path";
 import { detectTools } from "./detect.js";
 import {
   AGENTS_MD_SECTION,
-  CAPTURE_COMMAND,
   CLAUDE_MD_SECTION,
   CURSOR_RULE,
   LEGACY_MARKER_END,
   LEGACY_MARKER_START,
   MARKER_START,
   MARKER_END,
+  captureCommand,
   postCommitHook,
 } from "./templates.js";
 
 const MCP_COMMAND = "npx";
-const MCP_ARGS = ["--yes", "blimpr@latest", "mcp"];
+type Distribution = "npm" | "github";
+
+function packageSpec(distribution: Distribution): string {
+  return distribution === "github"
+    ? "github:danielsapps2/blimpr-cli"
+    : "blimpr@latest";
+}
 
 function upsertSection(filePath: string, section: string, heading: string) {
   if (!existsSync(filePath)) {
@@ -54,7 +60,11 @@ function upsertSection(filePath: string, section: string, heading: string) {
   return "appended";
 }
 
-function installGitHook(repoPath: string, log: (m: string) => void) {
+function installGitHook(
+  repoPath: string,
+  packageName: string,
+  log: (m: string) => void,
+) {
   const hooksDir = join(repoPath, ".git", "hooks");
   if (!existsSync(join(repoPath, ".git"))) {
     log("!  not a git repository — skipped git hook (run `git init` first)");
@@ -64,9 +74,9 @@ function installGitHook(repoPath: string, log: (m: string) => void) {
   const hookPath = join(hooksDir, "post-commit");
   if (existsSync(hookPath)) {
     const existing = readFileSync(hookPath, "utf8");
-    const captureLine = CAPTURE_COMMAND;
+    const captureLine = captureCommand(packageName);
     const managedCapture =
-      /^(?:node\s+"[^"]*\/packages\/installer\/dist\/cli\.js"|npx(?:\.cmd)?\s+(?:--yes|-y)\s+blimpr(?:@latest)?)\s+capture --quiet \|\| true\r?$/gm;
+      /^(?:node\s+"[^"]*\/packages\/installer\/dist\/cli\.js"|npx(?:\.cmd)?\s+(?:--yes|-y)\s+(?:blimpr(?:@latest)?|github:danielsapps2\/blimpr-cli))\s+capture --quiet \|\| true\r?$/gm;
     if (managedCapture.test(existing)) {
       const updated = `${existing
         .replace("# AutoShip:", "# Blimpr:")
@@ -85,12 +95,17 @@ function installGitHook(repoPath: string, log: (m: string) => void) {
     chmodSync(hookPath, 0o755);
     return;
   }
-  writeFileSync(hookPath, postCommitHook());
+  writeFileSync(hookPath, postCommitHook(packageName));
   chmodSync(hookPath, 0o755);
   log("✓  git post-commit hook installed");
 }
 
-function registerMcp(tool: "claude" | "codex", log: (m: string) => void) {
+function registerMcp(
+  tool: "claude" | "codex",
+  packageName: string,
+  log: (m: string) => void,
+) {
+  const mcpArgs = ["--yes", packageName, "mcp"];
   const options = {
     stdio: "ignore" as const,
     shell: process.platform === "win32",
@@ -106,16 +121,17 @@ function registerMcp(tool: "claude" | "codex", log: (m: string) => void) {
     }
     execFileSync(
       tool,
-      ["mcp", "add", "blimpr", "--", MCP_COMMAND, ...MCP_ARGS],
+      ["mcp", "add", "blimpr", "--", MCP_COMMAND, ...mcpArgs],
       options,
     );
     log(`✓  MCP server registered with ${tool === "claude" ? "Claude Code" : "Codex CLI"}`);
   } catch {
-    log(`!  failed to register MCP with ${tool} — run manually: ${tool} mcp add blimpr -- ${MCP_COMMAND} ${MCP_ARGS.join(" ")}`);
+    log(`!  failed to register MCP with ${tool} — run manually: ${tool} mcp add blimpr -- ${MCP_COMMAND} ${mcpArgs.join(" ")}`);
   }
 }
 
-function registerCursorMcp(log: (m: string) => void) {
+function registerCursorMcp(packageName: string, log: (m: string) => void) {
+  const mcpArgs = ["--yes", packageName, "mcp"];
   const cfgPath = join(homedir(), ".cursor", "mcp.json");
   let cfg: { mcpServers?: Record<string, unknown> } = {};
   if (existsSync(cfgPath)) {
@@ -130,22 +146,27 @@ function registerCursorMcp(log: (m: string) => void) {
   delete mcpServers.autoship;
   cfg.mcpServers = {
     ...mcpServers,
-    blimpr: { command: MCP_COMMAND, args: MCP_ARGS },
+    blimpr: { command: MCP_COMMAND, args: mcpArgs },
   };
   mkdirSync(dirname(cfgPath), { recursive: true });
   writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
   log("✓  MCP server added to ~/.cursor/mcp.json");
 }
 
-export function install(repoPath: string, log: (m: string) => void = console.log) {
+export function install(
+  repoPath: string,
+  log: (m: string) => void = console.log,
+  distribution: Distribution = "npm",
+) {
   const tools = detectTools();
+  const packageName = packageSpec(distribution);
   log(`Blimpr installer — repo: ${repoPath}`);
   log(
     `detected: Claude Code=${tools.claudeCode} Codex CLI=${tools.codexCli} Cursor=${tools.cursor}`,
   );
 
   // 1. Universal baseline: works whatever tool made the commit.
-  installGitHook(repoPath, log);
+  installGitHook(repoPath, packageName, log);
 
   // 2. Instruction layer.
   const agents = upsertSection(
@@ -177,9 +198,9 @@ export function install(repoPath: string, log: (m: string) => void = console.log
   if (process.env.BLIMPR_SKIP_MCP_REGISTRATION === "1") {
     log("!  MCP registration skipped by BLIMPR_SKIP_MCP_REGISTRATION");
   } else {
-    if (tools.claudeCode) registerMcp("claude", log);
-    if (tools.codexCli) registerMcp("codex", log);
-    if (tools.cursor) registerCursorMcp(log);
+    if (tools.claudeCode) registerMcp("claude", packageName, log);
+    if (tools.codexCli) registerMcp("codex", packageName, log);
+    if (tools.cursor) registerCursorMcp(packageName, log);
   }
 
   log("");

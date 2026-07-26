@@ -14,7 +14,7 @@ Until the first npm release is published, the same CLI can run directly from
 GitHub:
 
 ```sh
-npx github:danielsapps2/blimpr-cli install
+npx github:danielsapps2/blimpr-cli install --github
 ```
 
 Run the command anywhere inside a Git repository. Blimpr finds the nearest

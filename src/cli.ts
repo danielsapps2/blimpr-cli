@@ -79,7 +79,11 @@ async function runSync(silent: boolean): Promise<void> {
 
 switch (command) {
   case "install": {
-    install(resolveProjectPath(args[0]));
+    install(
+      resolveProjectPath(args[0]),
+      console.log,
+      rest.includes("--github") ? "github" : "npm",
+    );
     break;
   }
   case "capture": {

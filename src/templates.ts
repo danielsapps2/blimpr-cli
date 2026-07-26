@@ -55,12 +55,13 @@ viewer should notice. Do this proactively. Skip trivial changes.
 `;
 
 /** POSIX sh hook — git for Windows executes hooks through its bundled sh. */
-export const CAPTURE_COMMAND =
-  "npx --yes blimpr@latest capture --quiet || true";
+export function captureCommand(packageSpec: string): string {
+  return `npx --yes ${packageSpec} capture --quiet || true`;
+}
 
-export function postCommitHook(): string {
+export function postCommitHook(packageSpec: string): string {
   return `#!/bin/sh
 # Blimpr: queue this commit for the content pipeline. Never block the commit.
-${CAPTURE_COMMAND}
+${captureCommand(packageSpec)}
 `;
 }
