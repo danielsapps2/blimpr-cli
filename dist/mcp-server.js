@@ -21284,6 +21284,7 @@ async function cloudQueueRender(cfg, event) {
   let screenshotBytes = 0;
   const screenshots = [];
   for (const screenshot of event.screenshots ?? []) {
+    if (screenshots.length === 3) break;
     const encoded = screenshotDataUrl(screenshot.path);
     if (screenshotBytes + encoded.bytes > MAX_HOSTED_SCREENSHOT_BYTES) continue;
     screenshotBytes += encoded.bytes;

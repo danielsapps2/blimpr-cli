@@ -7,20 +7,17 @@ then queues that context for the founder's review-first content pipeline.
 ## Install in a repository
 
 ```sh
-npx blimpr install
+npx --yes github:danielsapps2/blimpr-cli install --github
 ```
 
-You can also run the latest source directly from GitHub:
+The command resolves the nearest Git repository even when you run it from a
+nested package or app directory.
+
+To make the shorter `blimpr` command available globally:
 
 ```sh
-npx github:danielsapps2/blimpr-cli install
-```
-
-To make the `blimpr` command available globally:
-
-```sh
-npm install --global blimpr
-blimpr install
+npm install --global github:danielsapps2/blimpr-cli
+blimpr install --github
 ```
 
 Run the command anywhere inside a Git repository. Blimpr finds the nearest
@@ -30,7 +27,7 @@ registers its five-tool MCP server with the coding tools found on the machine.
 Then connect the machine to a Blimpr account:
 
 ```sh
-npx blimpr link ask_your_key_here
+npx --yes github:danielsapps2/blimpr-cli link ask_your_key_here
 ```
 
 ## Commands
