@@ -28,7 +28,7 @@ import {
   postCommitHook,
 } from "./templates.js";
 
-const MCP_COMMAND = "npx";
+const MCP_COMMAND = process.platform === "win32" ? "npx.cmd" : "npx";
 type Distribution = "npm" | "github";
 
 function packageSpec(distribution: Distribution): string {
