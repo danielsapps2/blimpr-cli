@@ -22,7 +22,7 @@ the GitHub archive:
 
 ```sh
 npm install --global https://github.com/danielsapps2/blimpr-cli/archive/refs/heads/main.tar.gz
-blimpr install
+blimpr install --github
 ```
 
 Run the command anywhere inside a Git repository. Blimpr finds the nearest
