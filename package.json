@@ -1,0 +1,48 @@
+{
+  "name": "blimpr",
+  "version": "0.1.0",
+  "description": "Turn meaningful coding work into ready-to-review build-in-public videos.",
+  "type": "module",
+  "bin": {
+    "blimpr": "dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm run build",
+    "prepack": "npm run check"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/danielsapps2/blimpr-cli.git"
+  },
+  "homepage": "https://autoship-five.vercel.app",
+  "bugs": {
+    "url": "https://github.com/danielsapps2/blimpr-cli/issues"
+  },
+  "keywords": [
+    "mcp",
+    "codex",
+    "claude-code",
+    "cursor",
+    "build-in-public",
+    "developer-tools"
+  ],
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "@types/node": "^22.0.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.6.0",
+    "zod": "^3.24.0"
+  }
+}

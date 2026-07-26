@@ -1,0 +1,150 @@
+/**
+ * Cloud client for the hosted Blimpr backend (Supabase).
+ * The CLI authenticates with a per-user API key; the publishable anon key is
+ * safe to embed (all access is gated by RLS + security-definer RPCs).
+ */
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
+import { blimprDir } from "./store.js";
+import type { ReelScript, ShipEvent } from "./types.js";
+
+/** Hosted instance defaults — overridable via config or env for self-hosters. */
+const DEFAULT_URL = "https://zxpvdblgkglwjrrdykon.supabase.co";
+const DEFAULT_ANON_KEY =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp4cHZkYmxna2dsd2pycmR5a29uIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODUwMjA2NzksImV4cCI6MjEwMDU5NjY3OX0.DqmsNtGDJdUFS_EyURngLm9V52lLGXcYmLlKJT-Nt88";
+
+export interface CloudConfig {
+  url: string;
+  anonKey: string;
+  apiKey: string;
+  email?: string;
+}
+
+const configPath = () => join(blimprDir(), "config.json");
+
+export function getCloudConfig(): CloudConfig | undefined {
+  if (!existsSync(configPath())) return undefined;
+  try {
+    const cfg = JSON.parse(readFileSync(configPath(), "utf8")) as CloudConfig;
+    return cfg.apiKey ? cfg : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function saveCloudConfig(cfg: CloudConfig): void {
+  writeFileSync(configPath(), JSON.stringify(cfg, null, 2));
+}
+
+export function defaultCloud(): Pick<CloudConfig, "url" | "anonKey"> {
+  return {
+    url: process.env.BLIMPR_URL ?? DEFAULT_URL,
+    anonKey: process.env.BLIMPR_ANON_KEY ?? DEFAULT_ANON_KEY,
+  };
+}
+
+async function rpc<T>(
+  cfg: Pick<CloudConfig, "url" | "anonKey">,
+  fn: string,
+  args: Record<string, unknown>,
+): Promise<T> {
+  const res = await fetch(`${cfg.url}/rest/v1/rpc/${fn}`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      apikey: cfg.anonKey,
+      authorization: `Bearer ${cfg.anonKey}`,
+    },
+    body: JSON.stringify(args),
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`${fn} failed (${res.status}): ${body.slice(0, 300)}`);
+  }
+  return (await res.json()) as T;
+}
+
+export interface AccountInfo {
+  email: string | null;
+  product_name: string | null;
+  handle: string | null;
+  tone: string;
+  platforms: string[];
+  auto_post: boolean;
+  tier: string;
+  status: string;
+  monthly_cap: number;
+}
+
+export async function cloudLink(
+  apiKey: string,
+  base = defaultCloud(),
+): Promise<AccountInfo> {
+  return rpc<AccountInfo>(base, "cli_link", { p_key: apiKey });
+}
+
+export interface SyncResult extends AccountInfo {
+  events: { cli_id: string; id?: string; status?: string; skipped?: string }[];
+}
+
+export async function cloudSync(
+  cfg: CloudConfig,
+  events: ShipEvent[],
+): Promise<SyncResult> {
+  return rpc<SyncResult>(cfg, "cli_sync", {
+    p_key: cfg.apiKey,
+    p_events: events.map((e) => ({
+      id: e.id,
+      repoName: e.repoName,
+      kind: e.kind,
+      source: e.source,
+      summary: e.summary,
+      details: e.details ?? null,
+      files: e.files ?? null,
+      stats: e.stats ?? null,
+      capturedAt: e.capturedAt,
+    })),
+  });
+}
+
+export async function cloudRequestUpload(
+  cfg: CloudConfig,
+  cliId: string,
+): Promise<{ path?: string; used?: number; cap?: number; error?: string }> {
+  return rpc(cfg, "cli_request_upload", { p_key: cfg.apiKey, p_cli_id: cliId });
+}
+
+export async function cloudUploadVideo(
+  cfg: CloudConfig,
+  path: string,
+  bytes: Buffer,
+): Promise<void> {
+  const res = await fetch(`${cfg.url}/storage/v1/object/videos/${path}`, {
+    method: "POST",
+    headers: {
+      apikey: cfg.anonKey,
+      authorization: `Bearer ${cfg.anonKey}`,
+      "content-type": "video/mp4",
+    },
+    body: new Uint8Array(bytes),
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`upload failed (${res.status}): ${body.slice(0, 300)}`);
+  }
+}
+
+export async function cloudMarkRendered(
+  cfg: CloudConfig,
+  cliId: string,
+  path: string,
+  script?: ReelScript,
+): Promise<void> {
+  await rpc(cfg, "cli_mark_rendered", {
+    p_key: cfg.apiKey,
+    p_cli_id: cliId,
+    p_path: path,
+    p_script: script ?? null,
+    p_caption: script?.caption ?? null,
+  });
+}
